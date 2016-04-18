@@ -16,56 +16,49 @@ isCon (con _ _) = true
 isCon _ = false
 
 tryApply : (List (Arg Term) → Term) → Type → Tactical
-tryApply tm t rec hole =
-  do vs ← replicateA (visibleArity t) newMeta!
-  -| unify hole (tm (map vArg vs))
-  ~| _ <$ traverse rec (reverse vs)
+tryApply tm t =
+  do vs ← replicateA (visibleArity t) (liftT newMeta!)
+  -| solve (tm (map vArg vs))
+  ~| _ <$ traverse subgoal (reverse vs)
 
 tryFun : Name → Tactical
-tryFun f rec hole =
-  do t ← getType f
-  -| tryApply (def f) t rec hole
+tryFun f = tryApply (def f) =<< liftT (getType f)
 
 tryRecFun : Name → Tactical
-tryRecFun f = tryFun f ∘ guardT (not ∘ isCon)
+tryRecFun f = onSubgoals (guardT (not ∘ isCon)) (tryFun f)
 
 tryConstructor : Name → Tactical
-tryConstructor c rec hole = (λ t → tryApply (con c) t rec hole) =<< getType c
+tryConstructor c = tryApply (con c) =<< liftT (getType c)
 
 tryConstructors : Type → Tactical
-tryConstructors (def d _) rec hole =
-  choice ∘ map (λ c → tryConstructor c rec hole) =<< getConstructors d
-tryConstructors _ _ _ = empty
+tryConstructors (def d _) =
+  choice ∘ map tryConstructor =<< liftT (getConstructors d)
+tryConstructors _ = empty
 
-tryVariable : Nat → Type → Tactical
-tryVariable x t = tryApply (var x) t
+tryVariable : Nat → Arg Type → Tactical
+tryVariable x t = tryApply (var x) (unArg t)
 
 tryVariables : Tactical
-tryVariables rec hole =
-  do cxt ← getContext
-  -| choice (mapWithIndex (λ i t → tryVariable i (unArg t) rec hole) cxt)
+tryVariables =
+  do cxt ← liftT getContext
+  -| choice (mapWithIndex tryVariable cxt)
 
-tryAbsurdLambda : Arg Type → Tactic
-tryAbsurdLambda a hole = unify hole (pat-lam (absurd-clause ((absurd <$ a) ∷ []) ∷ []) [])
+tryAbsurdLambda : Arg Type → Tactical
+tryAbsurdLambda a = solve (pat-lam (absurd-clause ((absurd <$ a) ∷ []) ∷ []) [])
 
 tryLambda : Type → Tactical
-tryLambda (pi a b) rec hole =
-  tryAbsurdLambda a hole <|>
-  ( do m ← extendContext a (newMeta (unAbs b))
-    -| unify hole (lam (getVisibility a) (m <$ b))
-    ~| extendContext a (rec m) )
-tryLambda _ _ _ = empty
-
-typedTactical : (Type → Tactical) → Tactical
-typedTactical tac rec hole =
-  do goal ← inferType hole
-  -| tac goal rec hole
+tryLambda (pi a b) =
+  tryAbsurdLambda a <|>
+  ( do m ← liftT (extendContext a (newMeta (unAbs b)))
+    -| solve (lam (getVisibility a) (m <$ b))
+    ~| liftT₁ (extendContext a) (subgoal m) )
+tryLambda _ = empty
 
 introTactic′ : List Tactical → Nat → Tactic
 introTactic′ hints =
-  fixTac $ tryAll $ typedTactical tryLambda
+  runTac $ choice $ withGoalType tryLambda
                   ∷ tryVariables
-                  ∷ typedTactical tryConstructors
+                  ∷ withGoalType tryConstructors
                   ∷ hints
 
 introTactic : Nat → Tactic
