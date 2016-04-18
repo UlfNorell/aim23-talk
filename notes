@@ -4,13 +4,14 @@
 - Not clear how to make nested cases work. How do you specify what to case on?
   Maybe solution is to not specify it? Might be a lot to search...
 
-- Make a proper monad out of tactical?
-
 -- Plan for talk ----------------------------------------------------------
 
 - Intro / background
-- Show API (Terms + TC)
+  - David's thesis
+  - Show API (Terms + TC)
+
 - Tactical library
+
 - Intro tactic
   - Variable
   - Constructor
