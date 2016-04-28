@@ -4,6 +4,9 @@
 - Not clear how to make nested cases work. How do you specify what to case on?
   Maybe solution is to not specify it? Might be a lot to search...
 
+- Tactic composition: How to chain tactics nicely? onSubgoals doesn't quite do
+  the job.
+
 -- Plan for talk ----------------------------------------------------------
 
 - Intro / background

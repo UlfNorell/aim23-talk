@@ -2,6 +2,7 @@
 module Tactical where
 
 open import Prelude
+open import Container.Traversable
 open import Tactic.Reflection
 
 record Tac {a} (A : Set a) : Set a where
@@ -10,6 +11,8 @@ record Tac {a} (A : Set a) : Set a where
   field unTac : Tactic → Term → TC A
 
 open Tac public
+
+-- Boring instances --
 
 instance
   FunctorTac : ∀ {a} → Functor {a} Tac
@@ -36,6 +39,8 @@ instance
   empty {{AlternativeTac}} = mkTac λ _ _ → empty
   _<|>_ {{AlternativeTac}} (mkTac t) (mkTac t₁) = mkTac λ rec hole → t rec hole <|> t₁ rec hole
 
+-- Some operations --
+
 currentGoal : Tac Term
 currentGoal = mkTac λ _ hole → return hole
 
@@ -59,17 +64,14 @@ subgoal hole = mkTac λ rec _ → rec hole
 
 Tactical = Tac ⊤
 
-runTac : Tactical → Nat → Tactic
-runTac f zero _ = typeErrorS "Search depth exhausted"
-runTac f (suc depth) = unTac f (runTac f depth)
+-- Solve the current goal with `tm` (of type `t`) applied
+-- to subgoals for its visible arguments.
+apply : (List (Arg Term) → Term) → Type → Tactical
+apply tm t =
+  do vs ← replicateA (visibleArity t) (liftT newMeta!)
+  -| solve (tm (map vArg vs))
+  ~| _ <$ traverse subgoal (reverse vs)
 
-guardT : (Term → Bool) → Tactical
-guardT ok =
-  do hole ← currentGoal
-  -| subgoal hole
-  ~| v ← liftT (normalise hole)
-  -| guardA! (ok v) (return _)
-
--- Modify the tactic that gets applied to subgoals
-onSubgoals : ∀ {a} {A : Set a} → Tactical → Tac A → Tac A
-onSubgoals tac t = mkTac (unTac t ∘ unTac tac)
+fixTac : Tactical → Nat → Tactic
+fixTac f zero _ = typeErrorS "Search depth exhausted"
+fixTac f (suc depth) = unTac f (fixTac f depth)

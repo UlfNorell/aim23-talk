@@ -4,61 +4,62 @@ module Intro where
 
 open import Prelude
 open import Container.Traversable
+open import Container.List
 open import Tactic.Reflection
 
 open import Tactical
+open import Utils
 
-mapWithIndex : {A B : Set} → (Nat → A → B) → List A → List B
-mapWithIndex f xs = vecToList (f <$> tabulate finToNat <*> listToVec xs)
+-- Assumptions --
 
-isCon : Term → Bool
-isCon (con _ _) = true
-isCon _ = false
+applyVar : Nat → Arg Type → Tactical
+applyVar x t = apply (var x) (unArg t)
 
-tryApply : (List (Arg Term) → Term) → Type → Tactical
-tryApply tm t =
-  do vs ← replicateA (visibleArity t) (liftT newMeta!)
-  -| solve (tm (map vArg vs))
-  ~| _ <$ traverse subgoal (reverse vs)
-
-tryFun : Name → Tactical
-tryFun f = tryApply (def f) =<< liftT (getType f)
-
-tryRecFun : Name → Tactical
-tryRecFun f = onSubgoals (guardT (not ∘ isCon)) (tryFun f)
-
-tryConstructor : Name → Tactical
-tryConstructor c = tryApply (con c) =<< liftT (getType c)
-
-tryConstructors : Type → Tactical
-tryConstructors (def d _) =
-  choice ∘ map tryConstructor =<< liftT (getConstructors d)
-tryConstructors _ = empty
-
-tryVariable : Nat → Arg Type → Tactical
-tryVariable x t = tryApply (var x) (unArg t)
-
-tryVariables : Tactical
-tryVariables =
+assumptionsT : Tactical
+assumptionsT =
   do cxt ← liftT getContext
-  -| choice (mapWithIndex tryVariable cxt)
+  -| choice (mapWithIndex applyVar cxt)
+
+-- Solve with constructor --
+
+applyCon : Name → Tactical
+applyCon c = apply (con c) =<< liftT (getType c)
+
+applyCons : Type → Tactical
+applyCons (def d _) =
+  choice ∘ map applyCon =<< liftT (getConstructors d)
+applyCons _ = empty
+
+constructorsT = withGoalType applyCons
+
+ex₂ : Vec Bool 3
+ex₂ = runT (fixTac constructorsT 10)
+
+ex₃ : {A : Set} → A → Vec A 3
+ex₃ x = runT (fixTac (choice (assumptionsT ∷ constructorsT ∷ [])) 10)
+
+-- Introduce lambdas --
 
 tryAbsurdLambda : Arg Type → Tactical
 tryAbsurdLambda a = solve (pat-lam (absurd-clause ((absurd <$ a) ∷ []) ∷ []) [])
 
-tryLambda : Type → Tactical
-tryLambda (pi a b) =
+introLam : Type → Tactical
+introLam (pi a b) =
   tryAbsurdLambda a <|>
   ( do m ← liftT (extendContext a (newMeta (unAbs b)))
     -| solve (lam (getVisibility a) (m <$ b))
     ~| liftT₁ (extendContext a) (subgoal m) )
-tryLambda _ = empty
+introLam _ = empty
+
+lambdaT = withGoalType introLam
+
+-- Combining everything --
 
 introTactic′ : List Tactical → Nat → Tactic
 introTactic′ hints =
-  runTac $ choice $ withGoalType tryLambda
-                  ∷ tryVariables
-                  ∷ withGoalType tryConstructors
+  fixTac $ choice $ lambdaT
+                  ∷ assumptionsT
+                  ∷ constructorsT
                   ∷ hints
 
 introTactic : Nat → Tactic
@@ -76,8 +77,11 @@ macro
   intro′ : List Tactical → Tactic
   intro′ = introT′
 
-  hint : Name → Tactic
-  hint x = give (def₁ (quote tryFun) (lit (name x)))
+-- Try to apply a given function --
 
-  ih : Name → Tactic
-  ih x = give (def₁ (quote tryRecFun) (lit (name x)))
+applyFun : Name → Tactical
+applyFun f = apply (def f) =<< liftT (getType f)
+
+macro
+  hint : Name → Tactic
+  hint x = give (def₁ (quote applyFun) (lit (name x)))
